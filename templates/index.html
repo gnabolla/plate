@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Free License Plate Detection</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div style="text-align: right; margin-bottom: 10px;">
+            <a href="/admin" style="color: #4CAF50; text-decoration: none;">Admin Panel →</a>
+        </div>
+        <h1>License Plate Detection</h1>
+        <p class="subtitle">100% Free, Local, No API Keys Required</p>
+        
+        <div class="input-section">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('upload')">Upload Image</button>
+                <button class="tab" onclick="switchTab('camera')">Use Camera</button>
+                <button class="tab" onclick="switchTab('manual')">Manual Input</button>
+            </div>
+            
+            <div id="upload-tab" class="tab-content active">
+                <div class="upload-area" id="uploadArea">
+                    <svg width="50" height="50" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10 25 L25 10 L40 25 M25 10 L25 40"></path>
+                    </svg>
+                    <p>Drag & drop image or click to browse</p>
+                    <input type="file" id="fileInput" accept="image/*" hidden>
+                </div>
+                <img id="previewImage" class="preview hidden" alt="Preview">
+            </div>
+            
+            <div id="camera-tab" class="tab-content">
+                <video id="cameraVideo" class="camera-video" autoplay></video>
+                <canvas id="cameraCanvas" hidden></canvas>
+                <img id="capturedImage" class="preview hidden" alt="Captured">
+                <button id="startCameraBtn" class="btn">Start Camera</button>
+                <button id="captureBtn" class="btn hidden">Capture Photo</button>
+                <button id="retakeBtn" class="btn hidden">Retake</button>
+            </div>
+            
+            <div id="manual-tab" class="tab-content">
+                <input type="text" 
+                       id="manualInput" 
+                       class="manual-input" 
+                       placeholder="Enter license plate (e.g., ABC-1234)"
+                       maxlength="15">
+            </div>
+            
+            <button id="detectBtn" class="btn detect-btn">Detect License Plate</button>
+        </div>
+        
+        <div id="results" class="results hidden">
+            <h2>Detection Results</h2>
+            <div id="resultsContent"></div>
+            <button id="resetBtn" class="btn reset-btn">Reset</button>
+        </div>
+        
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Processing image...</p>
+        </div>
+    </div>
+    
+    <script src="/static/script.js"></script>
+</body>
+</html>

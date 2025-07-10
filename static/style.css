@@ -1,0 +1,311 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+h1 {
+    text-align: center;
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.subtitle {
+    text-align: center;
+    color: #666;
+    margin-bottom: 30px;
+}
+
+.input-section {
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    margin-bottom: 30px;
+}
+
+.tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+}
+
+.tab {
+    flex: 1;
+    padding: 10px;
+    border: 2px solid #ddd;
+    background: #f8f8f8;
+    cursor: pointer;
+    border-radius: 5px;
+    transition: all 0.3s;
+}
+
+.tab:hover {
+    background: #e8e8e8;
+}
+
+.tab.active {
+    background: #4CAF50;
+    color: white;
+    border-color: #4CAF50;
+}
+
+.tab-content {
+    display: none;
+    min-height: 200px;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.upload-area {
+    border: 2px dashed #ccc;
+    padding: 40px;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 10px;
+    transition: all 0.3s;
+}
+
+.upload-area:hover {
+    border-color: #999;
+    background: #fafafa;
+}
+
+.upload-area.dragover {
+    border-color: #4CAF50;
+    background: #f0f8f0;
+}
+
+.upload-area svg {
+    color: #999;
+    margin-bottom: 10px;
+}
+
+.preview {
+    max-width: 100%;
+    max-height: 400px;
+    margin: 20px auto;
+    display: block;
+    border-radius: 5px;
+}
+
+.camera-video {
+    width: 100%;
+    max-height: 400px;
+    border-radius: 5px;
+    background: #000;
+}
+
+.manual-input {
+    width: 100%;
+    padding: 15px;
+    font-size: 20px;
+    text-align: center;
+    border: 2px solid #ddd;
+    border-radius: 5px;
+    text-transform: uppercase;
+}
+
+.manual-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.btn {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 12px 30px;
+    font-size: 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s;
+    margin: 10px 5px;
+}
+
+.btn:hover {
+    background: #45a049;
+}
+
+.btn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+.detect-btn {
+    width: 100%;
+    margin-top: 20px;
+    font-size: 18px;
+    padding: 15px;
+}
+
+.reset-btn {
+    width: 100%;
+    margin-top: 20px;
+    background: #666;
+}
+
+.reset-btn:hover {
+    background: #555;
+}
+
+.results {
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.results h2 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.source {
+    color: #666;
+    margin-bottom: 15px;
+}
+
+.plate-result {
+    background: #f8f8f8;
+    padding: 20px;
+    margin-bottom: 15px;
+    border-radius: 5px;
+}
+
+.plate-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.plate-number {
+    font-size: 24px;
+    font-weight: bold;
+    font-family: monospace;
+    color: #333;
+}
+
+.confidence {
+    color: #666;
+}
+
+.vehicle-info {
+    background: white;
+    padding: 15px;
+    border-radius: 5px;
+    border: 1px solid #e0e0e0;
+}
+
+.vehicle-details {
+    margin-bottom: 10px;
+}
+
+.owner-details {
+    color: #555;
+    line-height: 1.8;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: bold;
+    margin-left: 10px;
+}
+
+.status-badge.active {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-badge.expired {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.status-badge.suspended {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.error {
+    background: #fee;
+    color: #c33;
+    padding: 15px;
+    border-radius: 5px;
+}
+
+.no-results {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+}
+
+.loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 1000;
+}
+
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #4CAF50;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loading p {
+    color: white;
+    font-size: 18px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+@media (max-width: 600px) {
+    .tabs {
+        flex-direction: column;
+    }
+    
+    .container {
+        padding: 10px;
+    }
+    
+    .input-section, .results {
+        padding: 20px;
+    }
+}
