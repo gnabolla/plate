@@ -155,7 +155,7 @@ detectBtn.addEventListener('click', async () => {
     detectBtn.disabled = true;
     
     try {
-        const response = await fetch('/detect', {
+        const response = await fetch('/plate/detect', {
             method: 'POST',
             body: formData
         });

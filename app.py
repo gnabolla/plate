@@ -1,8 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, Request, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 import pytesseract
 import cv2
 import numpy as np
@@ -13,67 +15,819 @@ import base64
 from PIL import Image
 import io
 import imutils
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Import database models and schemas
-from database import get_db, Owner, Vehicle, DetectionLog
+from database import get_db, Owner, Vehicle, DetectionLog, User, ViolationType, Violation, Payment, Appeal, AuditLog, ViolationStatus, PaymentStatus, PaymentMethod, AppealStatus
 import schemas
+from auth import (
+    authenticate_user, create_access_token, get_current_active_user,
+    get_current_super_admin, get_current_officer, get_current_cashier,
+    hash_password, create_audit_log, ACCESS_TOKEN_EXPIRE_MINUTES
+)
 
-app = FastAPI()
+app = FastAPI(
+    title="Traffic Violation Management System",
+    description="License plate detection with integrated violation management",
+    version="1.0.0"
+)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 os.makedirs("uploads", exist_ok=True)
 
+# ==================== Authentication Endpoints ====================
+
+@app.post("/api/auth/login", response_model=schemas.Token)
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Login endpoint that returns JWT token"""
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        # Log failed login attempt
+        create_audit_log(
+            db, None, "LOGIN_FAILED",
+            entity_type="user",
+            ip_address=request.client.host if request else None,
+            user_agent=request.headers.get("user-agent") if request else None
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    # Log successful login
+    create_audit_log(
+        db, user, "LOGIN_SUCCESS",
+        entity_type="user",
+        entity_id=user.id,
+        ip_address=request.client.host if request else None,
+        user_agent=request.headers.get("user-agent") if request else None
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/api/auth/logout")
+async def logout(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+    request: Request = None
+):
+    """Logout endpoint (mainly for audit logging)"""
+    create_audit_log(
+        db, current_user, "LOGOUT",
+        entity_type="user",
+        entity_id=current_user.id,
+        ip_address=request.client.host if request else None,
+        user_agent=request.headers.get("user-agent") if request else None
+    )
+    return {"message": "Successfully logged out"}
+
+@app.get("/api/auth/me", response_model=schemas.User)
+async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
+    """Get current user information"""
+    return current_user
+
+# ==================== User Management Endpoints (Super Admin Only) ====================
+
+@app.post("/api/users", response_model=schemas.User)
+async def create_user(
+    user_data: schemas.UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """Create a new user (Super Admin only)"""
+    # Check if username already exists
+    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered"
+        )
+    
+    # Check if email already exists
+    existing_email = db.query(User).filter(User.email == user_data.email).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
+    user_dict = user_data.dict()
+    password = user_dict.pop("password")
+    new_user = User(
+        **user_dict,
+        hashed_password=hash_password(password)
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    # Log user creation
+    create_audit_log(
+        db, current_user, "USER_CREATED",
+        entity_type="user",
+        entity_id=new_user.id,
+        new_values={"username": new_user.username, "role": new_user.role.value}
+    )
+    
+    return new_user
+
+@app.get("/api/users", response_model=List[schemas.User])
+async def list_users(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """List all users (Super Admin only)"""
+    users = db.query(User).offset(skip).limit(limit).all()
+    return users
+
+@app.put("/api/users/{user_id}", response_model=schemas.User)
+async def update_user(
+    user_id: int,
+    user_update: schemas.UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """Update user information (Super Admin only)"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Store old values for audit
+    old_values = {
+        "email": user.email,
+        "full_name": user.full_name,
+        "is_active": user.is_active
+    }
+    
+    # Update user fields
+    update_data = user_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(user, field, value)
+    
+    user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+    
+    # Log user update
+    create_audit_log(
+        db, current_user, "USER_UPDATED",
+        entity_type="user",
+        entity_id=user.id,
+        old_values=old_values,
+        new_values=update_data
+    )
+    
+    return user
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """Delete (deactivate) a user (Super Admin only)"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Don't allow deleting self
+    if user.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account"
+        )
+    
+    # Soft delete by deactivating
+    user.is_active = False
+    user.updated_at = datetime.utcnow()
+    db.commit()
+    
+    # Log user deletion
+    create_audit_log(
+        db, current_user, "USER_DEACTIVATED",
+        entity_type="user",
+        entity_id=user.id
+    )
+    
+    return {"message": "User deactivated successfully"}
+
+# ==================== Violation Type Management (Super Admin Only) ====================
+
+@app.get("/api/violation-types", response_model=List[schemas.ViolationType])
+async def list_violation_types(
+    skip: int = 0,
+    limit: int = 100,
+    is_active: Optional[bool] = None,
+    db: Session = Depends(get_db)
+):
+    """List all violation types (public endpoint for officers to see available types)"""
+    query = db.query(ViolationType)
+    if is_active is not None:
+        query = query.filter(ViolationType.is_active == is_active)
+    violation_types = query.offset(skip).limit(limit).all()
+    return violation_types
+
+@app.post("/api/violation-types", response_model=schemas.ViolationType)
+async def create_violation_type(
+    violation_type: schemas.ViolationTypeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """Create a new violation type (Super Admin only)"""
+    # Check if code already exists
+    existing = db.query(ViolationType).filter(ViolationType.code == violation_type.code).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Violation type code already exists"
+        )
+    
+    new_violation_type = ViolationType(**violation_type.dict())
+    db.add(new_violation_type)
+    db.commit()
+    db.refresh(new_violation_type)
+    
+    # Log creation
+    create_audit_log(
+        db, current_user, "VIOLATION_TYPE_CREATED",
+        entity_type="violation_type",
+        entity_id=new_violation_type.id,
+        new_values=violation_type.dict()
+    )
+    
+    return new_violation_type
+
+@app.put("/api/violation-types/{type_id}", response_model=schemas.ViolationType)
+async def update_violation_type(
+    type_id: int,
+    violation_update: schemas.ViolationTypeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """Update violation type (Super Admin only)"""
+    violation_type = db.query(ViolationType).filter(ViolationType.id == type_id).first()
+    if not violation_type:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation type not found"
+        )
+    
+    # Store old values for audit
+    old_values = {
+        "name": violation_type.name,
+        "fine_amount": violation_type.fine_amount,
+        "is_active": violation_type.is_active
+    }
+    
+    # Update fields
+    update_data = violation_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(violation_type, field, value)
+    
+    db.commit()
+    db.refresh(violation_type)
+    
+    # Log update
+    create_audit_log(
+        db, current_user, "VIOLATION_TYPE_UPDATED",
+        entity_type="violation_type",
+        entity_id=violation_type.id,
+        old_values=old_values,
+        new_values=update_data
+    )
+    
+    return violation_type
+
+# ==================== Violation Management ====================
+
+@app.post("/api/violations", response_model=schemas.Violation)
+async def create_violation(
+    violation_data: schemas.ViolationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_officer),
+    request: Request = None
+):
+    """Create a new violation (Officers and Super Admins only)"""
+    # Verify vehicle exists if provided
+    if violation_data.vehicle_id:
+        vehicle = db.query(Vehicle).filter(Vehicle.id == violation_data.vehicle_id).first()
+        if not vehicle:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Vehicle not found"
+            )
+    
+    # Verify violation type exists
+    violation_type = db.query(ViolationType).filter(
+        ViolationType.id == violation_data.violation_type_id
+    ).first()
+    if not violation_type:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation type not found"
+        )
+    
+    # Generate unique ticket number
+    import random
+    import string
+    ticket_number = f"TKT-{datetime.now().strftime('%Y%m%d')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
+    
+    # Create violation
+    violation_dict = violation_data.dict()
+    new_violation = Violation(
+        **violation_dict,
+        ticket_number=ticket_number,
+        officer_id=current_user.id,
+        issued_at=datetime.utcnow(),
+        status=ViolationStatus.PENDING  # Use database enum
+    )
+    
+    # Set due date if not provided (default: 30 days from now)
+    if not new_violation.due_date:
+        new_violation.due_date = datetime.utcnow() + timedelta(days=30)
+    
+    db.add(new_violation)
+    db.commit()
+    db.refresh(new_violation)
+    
+    # Log violation creation
+    create_audit_log(
+        db, current_user, "VIOLATION_CREATED",
+        entity_type="violation",
+        entity_id=new_violation.id,
+        new_values={
+            "ticket_number": new_violation.ticket_number,
+            "vehicle_id": new_violation.vehicle_id,
+            "violation_type_id": new_violation.violation_type_id,
+            "fine_amount": new_violation.fine_amount
+        },
+        ip_address=request.client.host if request else None
+    )
+    
+    return new_violation
+
+@app.get("/api/violations", response_model=List[schemas.Violation])
+async def list_violations(
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[schemas.ViolationStatus] = None,
+    vehicle_id: Optional[int] = None,
+    officer_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """List violations with filters"""
+    query = db.query(Violation)
+    
+    # Apply filters based on user role
+    if current_user.role == schemas.UserRole.OFFICER:
+        # Officers can only see their own violations
+        query = query.filter(Violation.officer_id == current_user.id)
+    elif current_user.role == schemas.UserRole.CASHIER:
+        # Cashiers can see all violations but mainly interested in pending payments
+        if not status:
+            status = ViolationStatus.PENDING
+    
+    # Apply additional filters
+    if status:
+        query = query.filter(Violation.status == status)
+    if vehicle_id:
+        query = query.filter(Violation.vehicle_id == vehicle_id)
+    if officer_id and current_user.role == schemas.UserRole.SUPER_ADMIN:
+        query = query.filter(Violation.officer_id == officer_id)
+    
+    violations = query.order_by(Violation.issued_at.desc()).offset(skip).limit(limit).all()
+    return violations
+
+@app.get("/api/violations/{violation_id}", response_model=schemas.Violation)
+async def get_violation(
+    violation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get specific violation details"""
+    violation = db.query(Violation).filter(Violation.id == violation_id).first()
+    if not violation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation not found"
+        )
+    
+    # Check permissions
+    if current_user.role == schemas.UserRole.OFFICER and violation.officer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view violations you issued"
+        )
+    
+    return violation
+
+@app.get("/api/violations/ticket/{ticket_number}", response_model=schemas.Violation)
+async def get_violation_by_ticket(
+    ticket_number: str,
+    db: Session = Depends(get_db)
+):
+    """Get violation by ticket number (public endpoint for payment lookup)"""
+    violation = db.query(Violation).filter(Violation.ticket_number == ticket_number).first()
+    if not violation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation not found with this ticket number"
+        )
+    
+    return violation
+
+@app.put("/api/violations/{violation_id}", response_model=schemas.Violation)
+async def update_violation(
+    violation_id: int,
+    violation_update: schemas.ViolationUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update violation (status changes, etc.)"""
+    violation = db.query(Violation).filter(Violation.id == violation_id).first()
+    if not violation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation not found"
+        )
+    
+    # Check permissions
+    if current_user.role == schemas.UserRole.OFFICER and violation.officer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update violations you issued"
+        )
+    
+    # Store old values for audit
+    old_values = {
+        "status": violation.status.value if violation.status else None,
+        "description": violation.description,
+        "due_date": violation.due_date.isoformat() if violation.due_date else None
+    }
+    
+    # Update fields
+    update_data = violation_update.dict(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(violation, field, value)
+    
+    db.commit()
+    db.refresh(violation)
+    
+    # Log update
+    create_audit_log(
+        db, current_user, "VIOLATION_UPDATED",
+        entity_type="violation",
+        entity_id=violation.id,
+        old_values=old_values,
+        new_values=update_data
+    )
+    
+    return violation
+
+# ==================== Appeal Management ====================
+
+@app.post("/api/appeals", response_model=schemas.Appeal)
+async def create_appeal(
+    appeal_data: schemas.AppealCreate,
+    db: Session = Depends(get_db)
+):
+    """Create an appeal for a violation (public endpoint)"""
+    # Verify violation exists
+    violation = db.query(Violation).filter(Violation.id == appeal_data.violation_id).first()
+    if not violation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation not found"
+        )
+    
+    # Check if appeal already exists
+    existing_appeal = db.query(Appeal).filter(
+        Appeal.violation_id == appeal_data.violation_id,
+        Appeal.status.in_([AppealStatus.PENDING, AppealStatus.UNDER_REVIEW])
+    ).first()
+    if existing_appeal:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="An appeal is already pending for this violation"
+        )
+    
+    # Create appeal
+    new_appeal = Appeal(**appeal_data.dict())
+    db.add(new_appeal)
+    
+    # Update violation status
+    violation.status = ViolationStatus.APPEALED
+    
+    db.commit()
+    db.refresh(new_appeal)
+    
+    return new_appeal
+
+@app.get("/api/appeals", response_model=List[schemas.Appeal])
+async def list_appeals(
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[schemas.AppealStatus] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """List all appeals (Super Admin only)"""
+    query = db.query(Appeal)
+    if status:
+        query = query.filter(Appeal.status == status)
+    
+    appeals = query.order_by(Appeal.submitted_at.desc()).offset(skip).limit(limit).all()
+    return appeals
+
+@app.put("/api/appeals/{appeal_id}", response_model=schemas.Appeal)
+async def update_appeal(
+    appeal_id: int,
+    appeal_update: schemas.AppealUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_super_admin)
+):
+    """Update appeal status (Super Admin only)"""
+    appeal = db.query(Appeal).filter(Appeal.id == appeal_id).first()
+    if not appeal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Appeal not found"
+        )
+    
+    # Update appeal
+    appeal.status = appeal_update.status
+    appeal.review_notes = appeal_update.review_notes
+    appeal.reviewer_id = current_user.id
+    appeal.reviewed_at = datetime.utcnow()
+    
+    # Update violation status based on appeal outcome
+    violation = appeal.violation
+    if appeal_update.status == AppealStatus.APPROVED:
+        violation.status = ViolationStatus.CANCELLED
+    elif appeal_update.status == AppealStatus.REJECTED:
+        violation.status = ViolationStatus.PENDING
+    
+    db.commit()
+    db.refresh(appeal)
+    
+    # Log appeal update
+    create_audit_log(
+        db, current_user, "APPEAL_REVIEWED",
+        entity_type="appeal",
+        entity_id=appeal.id,
+        new_values={
+            "status": appeal_update.status.value,
+            "review_notes": appeal_update.review_notes
+        }
+    )
+    
+    return appeal
+
+# ==================== Payment Processing ====================
+
+@app.post("/api/payments", response_model=schemas.Payment)
+async def process_payment(
+    payment_data: schemas.PaymentCreate,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_cashier)
+):
+    """Process a payment for a violation (Cashiers and Super Admins)"""
+    # Verify violation exists
+    violation = db.query(Violation).filter(Violation.id == payment_data.violation_id).first()
+    if not violation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation not found"
+        )
+    
+    # Check if violation is already paid
+    if violation.status == ViolationStatus.PAID:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This violation has already been paid"
+        )
+    
+    # Generate transaction ID
+    import uuid
+    transaction_id = f"PAY-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
+    
+    # Generate receipt number
+    receipt_number = f"RCP-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    
+    # Create payment record
+    payment = Payment(
+        transaction_id=transaction_id,
+        receipt_number=receipt_number,
+        violation_id=payment_data.violation_id,
+        amount=payment_data.amount,
+        payment_method=PaymentMethod[payment_data.payment_method.upper()],  # Use database enum
+        reference_number=payment_data.reference_number,
+        status=PaymentStatus.COMPLETED,
+        cashier_id=current_user.id if current_user else None,
+        payment_date=datetime.utcnow()
+    )
+    
+    # Update violation status
+    violation.status = ViolationStatus.PAID
+    
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+    
+    # Log payment
+    create_audit_log(
+        db, current_user, "PAYMENT_PROCESSED",
+        entity_type="payment",
+        entity_id=payment.id,
+        new_values={
+            "transaction_id": payment.transaction_id,
+            "amount": payment.amount,
+            "payment_method": payment.payment_method.value,
+            "violation_id": payment.violation_id
+        }
+    )
+    
+    return payment
+
+@app.get("/api/payments", response_model=List[schemas.Payment])
+async def list_payments(
+    skip: int = 0,
+    limit: int = 100,
+    status: Optional[schemas.PaymentStatus] = None,
+    payment_method: Optional[schemas.PaymentMethod] = None,
+    cashier_id: Optional[int] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """List payments with filters"""
+    query = db.query(Payment)
+    
+    # Role-based filtering
+    if current_user.role == schemas.UserRole.CASHIER:
+        # Cashiers can only see their own processed payments
+        query = query.filter(Payment.cashier_id == current_user.id)
+    
+    # Apply filters
+    if status:
+        query = query.filter(Payment.status == status)
+    if payment_method:
+        query = query.filter(Payment.payment_method == payment_method)
+    if cashier_id and current_user.role == schemas.UserRole.SUPER_ADMIN:
+        query = query.filter(Payment.cashier_id == cashier_id)
+    if start_date:
+        query = query.filter(Payment.payment_date >= start_date)
+    if end_date:
+        query = query.filter(Payment.payment_date <= end_date)
+    
+    payments = query.order_by(Payment.payment_date.desc()).offset(skip).limit(limit).all()
+    return payments
+
+@app.get("/api/payments/{payment_id}", response_model=schemas.Payment)
+async def get_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get specific payment details"""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found"
+        )
+    
+    # Check permissions
+    if current_user.role == schemas.UserRole.CASHIER and payment.cashier_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view payments you processed"
+        )
+    
+    return payment
+
+@app.get("/api/violations/{violation_id}/payments", response_model=List[schemas.Payment])
+async def get_violation_payments(
+    violation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all payments for a specific violation"""
+    violation = db.query(Violation).filter(Violation.id == violation_id).first()
+    if not violation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Violation not found"
+        )
+    
+    payments = db.query(Payment).filter(Payment.violation_id == violation_id).all()
+    return payments
+
+# ==================== Dashboard/Statistics Endpoints ====================
+
+@app.get("/api/dashboard/statistics")
+async def get_dashboard_statistics(
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get dashboard statistics based on user role"""
+    stats = {}
+    
+    if current_user.role == schemas.UserRole.SUPER_ADMIN:
+        # Admin sees everything
+        stats["total_violations"] = db.query(Violation).count()
+        stats["pending_violations"] = db.query(Violation).filter(
+            Violation.status == ViolationStatus.PENDING
+        ).count()
+        stats["paid_violations"] = db.query(Violation).filter(
+            Violation.status == ViolationStatus.PAID
+        ).count()
+        stats["total_revenue"] = db.query(Payment).filter(
+            Payment.status == PaymentStatus.COMPLETED
+        ).with_entities(func.sum(Payment.amount)).scalar() or 0
+        stats["active_officers"] = db.query(User).filter(
+            User.role == schemas.UserRole.OFFICER,
+            User.is_active == True
+        ).count()
+        stats["pending_appeals"] = db.query(Appeal).filter(
+            Appeal.status == AppealStatus.PENDING
+        ).count()
+        
+    elif current_user.role == schemas.UserRole.OFFICER:
+        # Officers see their own statistics
+        stats["my_violations_issued"] = db.query(Violation).filter(
+            Violation.officer_id == current_user.id
+        ).count()
+        stats["my_violations_paid"] = db.query(Violation).filter(
+            Violation.officer_id == current_user.id,
+            Violation.status == ViolationStatus.PAID
+        ).count()
+        stats["my_violations_pending"] = db.query(Violation).filter(
+            Violation.officer_id == current_user.id,
+            Violation.status == ViolationStatus.PENDING
+        ).count()
+        
+    elif current_user.role == schemas.UserRole.CASHIER:
+        # Cashiers see payment statistics
+        stats["payments_processed_today"] = db.query(Payment).filter(
+            Payment.cashier_id == current_user.id,
+            Payment.payment_date >= datetime.now().replace(hour=0, minute=0, second=0)
+        ).count()
+        stats["total_collected_today"] = db.query(Payment).filter(
+            Payment.cashier_id == current_user.id,
+            Payment.payment_date >= datetime.now().replace(hour=0, minute=0, second=0),
+            Payment.status == PaymentStatus.COMPLETED
+        ).with_entities(func.sum(Payment.amount)).scalar() or 0
+        stats["pending_payments"] = db.query(Violation).filter(
+            Violation.status == ViolationStatus.PENDING
+        ).count()
+    
+    return stats
+
+# ==================== Existing Routes ====================
+
+def normalize_plate_number(plate):
+    """Normalize plate number by removing spaces, hyphens, and converting to uppercase"""
+    if not plate:
+        return ""
+    # Remove all non-alphanumeric characters and convert to uppercase
+    normalized = re.sub(r'[^A-Za-z0-9]', '', plate).upper()
+    return normalized
+
 def preprocess_image(image):
     """Preprocess image for better OCR accuracy"""
     # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
-    # Apply bilateral filter to reduce noise while keeping edges sharp
-    gray = cv2.bilateralFilter(gray, 11, 17, 17)
-    
-    # Find edges in the image
-    edged = cv2.Canny(gray, 30, 200)
-    
-    # Find contours
-    cnts = cv2.findContours(edged.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    cnts = imutils.grab_contours(cnts)
-    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:10]
-    
-    plate_image = None
-    
-    # Loop over contours to find license plate
-    for c in cnts:
-        # Approximate the contour
-        peri = cv2.arcLength(c, True)
-        approx = cv2.approxPolyDP(c, 0.018 * peri, True)
-        
-        # If contour has 4 points, it might be a license plate
-        if len(approx) == 4:
-            x, y, w, h = cv2.boundingRect(approx)
-            aspect_ratio = w / float(h)
-            
-            # License plates typically have aspect ratio between 2:1 and 5:1
-            if 2.0 <= aspect_ratio <= 5.0:
-                plate_image = gray[y:y+h, x:x+w]
-                break
-    
-    # If no plate-like contour found, process the whole image
-    if plate_image is None:
-        plate_image = gray
-    
-    # Resize for better OCR
-    plate_image = cv2.resize(plate_image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    
-    # Apply threshold to get black text on white background
-    _, plate_image = cv2.threshold(plate_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    # Denoise
-    plate_image = cv2.medianBlur(plate_image, 3)
-    
-    return plate_image
+    # Simple preprocessing - just return grayscale for now
+    # This will help us debug if the complex preprocessing is the issue
+    return gray
 
 def extract_plate_number(text):
     """Extract likely license plate patterns from OCR text"""
@@ -103,6 +857,18 @@ def extract_plate_number(text):
     
     # Filter candidates by length (most plates are 5-8 characters)
     candidates = [c for c in candidates if 4 <= len(c.replace('-', '').replace(' ', '')) <= 10]
+    
+    # Add hyphenated versions for common patterns
+    additional_candidates = []
+    for c in candidates:
+        # If it looks like ABC1234, also try ABC-1234
+        if re.match(r'^[A-Z]{3}\d{4}$', c):
+            additional_candidates.append(f"{c[:3]}-{c[3:]}")
+        # If it looks like AB1234, also try AB-1234
+        elif re.match(r'^[A-Z]{2}\d{4}$', c):
+            additional_candidates.append(f"{c[:2]}-{c[2:]}")
+    
+    candidates.extend(additional_candidates)
     
     # Remove duplicates while preserving order
     seen = set()
@@ -139,12 +905,16 @@ async def get_owners(skip: int = 0, limit: int = 100, db: Session = Depends(get_
 
 @app.post("/api/vehicles", response_model=schemas.Vehicle)
 async def create_vehicle(vehicle: schemas.VehicleCreate, db: Session = Depends(get_db)):
+    # Normalize the plate number to uppercase for consistent storage
+    vehicle_data = vehicle.dict()
+    vehicle_data['plate_number'] = vehicle_data['plate_number'].upper()
+    
     # Check if plate already exists
-    existing = db.query(Vehicle).filter(Vehicle.plate_number == vehicle.plate_number).first()
+    existing = db.query(Vehicle).filter(Vehicle.plate_number == vehicle_data['plate_number']).first()
     if existing:
         raise HTTPException(status_code=400, detail="Plate number already registered")
     
-    db_vehicle = Vehicle(**vehicle.dict())
+    db_vehicle = Vehicle(**vehicle_data)
     db.add(db_vehicle)
     db.commit()
     db.refresh(db_vehicle)
@@ -173,8 +943,21 @@ async def detect_plate(
         if manual_plate:
             # Check database for manual input too
             plate_upper = manual_plate.upper()
-            print(f"Searching for plate: {plate_upper}")  # Debug
-            vehicle = db.query(Vehicle).filter(Vehicle.plate_number == plate_upper).first()
+            normalized_input = normalize_plate_number(manual_plate)
+            print(f"Searching for plate: {plate_upper} (normalized: {normalized_input})")  # Debug
+            
+            # Query database - try to find vehicles where normalized plate matches
+            all_vehicles = db.query(Vehicle).all()
+            vehicle = None
+            print(f"Total vehicles in database: {len(all_vehicles)}")  # Debug
+            for v in all_vehicles:
+                normalized_db = normalize_plate_number(v.plate_number)
+                print(f"DB plate: {v.plate_number} -> normalized: {normalized_db}")  # Debug
+                if normalized_db == normalized_input:
+                    vehicle = v
+                    print(f"MATCH FOUND! Plate: {v.plate_number}, Owner: {v.owner.first_name} {v.owner.last_name}")  # Debug
+                    break
+            
             print(f"Vehicle found: {vehicle is not None}")  # Debug
             
             # Log the detection
@@ -256,7 +1039,7 @@ async def detect_plate(
             try:
                 text = pytesseract.image_to_string(processed_image, config=config)
                 all_text.append(text)
-            except:
+            except Exception as e:
                 pass
         
         # Combine all OCR results
@@ -270,7 +1053,7 @@ async def detect_plate(
             text = pytesseract.image_to_string(image)
             more_candidates = extract_plate_number(text)
             plate_candidates.extend(more_candidates)
-        except:
+        except Exception as e:
             pass
         
         # Remove duplicates and create results
@@ -288,8 +1071,14 @@ async def detect_plate(
         # Check database for vehicle info and log detections
         results_with_info = []
         for plate in plates[:3]:
-            # Look up vehicle in database
-            vehicle = db.query(Vehicle).filter(Vehicle.plate_number == plate['text'].upper()).first()
+            # Look up vehicle in database using normalized plate
+            normalized_detected = normalize_plate_number(plate['text'])
+            all_vehicles = db.query(Vehicle).all()
+            vehicle = None
+            for v in all_vehicles:
+                if normalize_plate_number(v.plate_number) == normalized_detected:
+                    vehicle = v
+                    break
             
             # Log the detection
             detection_log = DetectionLog(

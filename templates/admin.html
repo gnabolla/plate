@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - License Plate System</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/plate/static/style.css">
     <style>
         .admin-container {
             max-width: 1200px;
@@ -65,11 +65,68 @@
         .back-link:hover {
             text-decoration: underline;
         }
+        .owner-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .vehicle-count {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toggle-icon {
+            transition: transform 0.3s ease;
+            display: inline-block;
+        }
+        .toggle-icon.open {
+            transform: rotate(90deg);
+        }
+        .vehicle-list {
+            margin-top: 15px;
+            padding-left: 20px;
+            border-left: 3px solid #e0e0e0;
+        }
+        .vehicle-item {
+            background: #f9f9f9;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            border: 1px solid #e0e0e0;
+        }
+        .plate-number {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1a237e;
+            margin-bottom: 5px;
+        }
+        .vehicle-details {
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .vehicle-status {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .status-active {
+            color: #4CAF50;
+        }
+        .status-expired {
+            color: #f44336;
+        }
+        .status-suspended {
+            color: #ff9800;
+        }
+        .no-vehicles {
+            color: #999;
+            font-style: italic;
+            padding: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="admin-container">
-        <a href="/" class="back-link">← Back to Detection</a>
+        <a href="/plate/" class="back-link">← Back to Detection</a>
         <h1>Admin Panel</h1>
         
         <div id="successMessage" class="success-message" style="display: none;"></div>
@@ -179,13 +236,36 @@
             <h2>Recent Owners</h2>
             <div class="owner-list">
                 {% for owner in owners %}
-                <div class="owner-item">
-                    <div>
-                        <strong>{{ owner.first_name }} {{ owner.last_name }}</strong>
-                        {% if owner.email %} - {{ owner.email }}{% endif %}
-                        {% if owner.phone %} - {{ owner.phone }}{% endif %}
+                <div class="owner-item" onclick="toggleVehicles('owner-{{ owner.id }}')" style="cursor: pointer;">
+                    <div class="owner-header">
+                        <div>
+                            <strong>{{ owner.first_name }} {{ owner.last_name }}</strong>
+                            {% if owner.email %} - {{ owner.email }}{% endif %}
+                            {% if owner.phone %} - {{ owner.phone }}{% endif %}
+                        </div>
+                        <div class="vehicle-count">
+                            <span class="toggle-icon" id="icon-owner-{{ owner.id }}">▶</span>
+                            {{ owner.vehicles|length }} vehicle(s)
+                        </div>
                     </div>
-                    <div>{{ owner.vehicles|length }} vehicle(s)</div>
+                    <div class="vehicle-list" id="owner-{{ owner.id }}" style="display: none;">
+                        {% if owner.vehicles|length > 0 %}
+                            {% for vehicle in owner.vehicles %}
+                            <div class="vehicle-item">
+                                <div class="plate-number">{{ vehicle.plate_number }}</div>
+                                <div class="vehicle-details">
+                                    {{ vehicle.make }} {{ vehicle.model }} {% if vehicle.year %}({{ vehicle.year }}){% endif %}
+                                    {% if vehicle.color %} - {{ vehicle.color }}{% endif %}
+                                </div>
+                                <div class="vehicle-status status-{{ vehicle.status }}">
+                                    Status: {{ vehicle.status }}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <div class="no-vehicles">No vehicles registered</div>
+                        {% endif %}
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -200,7 +280,7 @@
             const data = Object.fromEntries(formData);
             
             try {
-                const response = await fetch('/api/owners', {
+                const response = await fetch('/plate/api/owners', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -229,8 +309,28 @@
             // Convert owner_id to integer
             data.owner_id = parseInt(data.owner_id);
             
+            // Convert year to number if provided
+            if (data.year) {
+                data.year = parseInt(data.year);
+            }
+            
+            // Remove empty date fields
+            if (!data.registration_date) {
+                delete data.registration_date;
+            }
+            if (!data.expiry_date) {
+                delete data.expiry_date;
+            }
+            
+            // Remove other empty fields
+            Object.keys(data).forEach(key => {
+                if (data[key] === '') {
+                    delete data[key];
+                }
+            });
+            
             try {
-                const response = await fetch('/api/vehicles', {
+                const response = await fetch('/plate/api/vehicles', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -243,7 +343,17 @@
                     e.target.reset();
                 } else {
                     const error = await response.json();
-                    alert('Error: ' + error.detail);
+                    if (error.detail) {
+                        if (Array.isArray(error.detail)) {
+                            // Handle validation errors
+                            const messages = error.detail.map(e => `${e.loc[1]}: ${e.msg}`).join('\n');
+                            alert('Validation errors:\n' + messages);
+                        } else {
+                            alert('Error: ' + error.detail);
+                        }
+                    } else {
+                        alert('Error: ' + JSON.stringify(error));
+                    }
                 }
             } catch (err) {
                 alert('Error: ' + err.message);
@@ -257,6 +367,19 @@
             setTimeout(() => {
                 msgDiv.style.display = 'none';
             }, 3000);
+        }
+        
+        function toggleVehicles(ownerId) {
+            const vehicleList = document.getElementById(ownerId);
+            const icon = document.getElementById('icon-' + ownerId);
+            
+            if (vehicleList.style.display === 'none') {
+                vehicleList.style.display = 'block';
+                icon.classList.add('open');
+            } else {
+                vehicleList.style.display = 'none';
+                icon.classList.remove('open');
+            }
         }
     </script>
 </body>
