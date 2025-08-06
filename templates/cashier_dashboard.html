@@ -1,0 +1,661 @@
+{% extends "dashboard_base.html" %}
+
+{% block title %}Cashier Dashboard{% endblock %}
+{% block page_title %}Cashier Dashboard{% endblock %}
+
+{% block allowed_roles %}['cashier', 'super_admin']{% endblock %}
+
+{% block nav_items %}
+<li>
+    <a href="/plate/cashier/dashboard" class="nav-link active">
+        <i class="fas fa-tachometer-alt"></i>
+        <span>Dashboard</span>
+    </a>
+</li>
+<li>
+    <a href="#" class="nav-link" onclick="showPaymentLookup(); return false;">
+        <i class="fas fa-search-dollar"></i>
+        <span>Process Payment</span>
+    </a>
+</li>
+{% endblock %}
+
+{% block content %}
+<!-- Statistics Cards -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="todayCollections">$0</div>
+                <div class="stat-label">Today's Collections</div>
+            </div>
+            <div class="stat-icon success">
+                <i class="fas fa-dollar-sign"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="todayTransactions">0</div>
+                <div class="stat-label">Transactions Today</div>
+            </div>
+            <div class="stat-icon primary">
+                <i class="fas fa-receipt"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="pendingPayments">0</div>
+                <div class="stat-label">Pending Violations</div>
+            </div>
+            <div class="stat-icon warning">
+                <i class="fas fa-clock"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="monthlyTotal">$0</div>
+                <div class="stat-label">This Month Total</div>
+            </div>
+            <div class="stat-icon info">
+                <i class="fas fa-calendar-alt"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Quick Actions</h3>
+    </div>
+    <div class="card-body">
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="showPaymentLookup()">
+                <i class="fas fa-search-dollar"></i>
+                Process Payment
+            </button>
+            <button class="btn btn-secondary" onclick="showQuickSearch()">
+                <i class="fas fa-search"></i>
+                Quick Ticket Search
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Payments -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Recent Payments</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="data-table" id="recentPaymentsTable">
+                <thead>
+                    <tr>
+                        <th>Receipt #</th>
+                        <th>Ticket #</th>
+                        <th>Plate</th>
+                        <th>Amount</th>
+                        <th>Method</th>
+                        <th>Time</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Payment Processing Modal -->
+<div id="paymentModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Process Payment</h3>
+            <button onclick="closePaymentModal()" class="close-btn">&times;</button>
+        </div>
+        
+        <!-- Step 1: Lookup -->
+        <div id="lookupStep">
+            <form id="lookupForm">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label" for="ticketNumber">Ticket Number</label>
+                        <input type="text" id="ticketNumber" class="form-control" 
+                               placeholder="e.g., TKT-2025-0001" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" onclick="closePaymentModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-search"></i>
+                        Search
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <!-- Step 2: Violation Details & Payment -->
+        <div id="paymentStep" style="display: none;">
+            <div class="modal-body">
+                <!-- Violation Details -->
+                <div class="violation-details">
+                    <h4>Violation Details</h4>
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <span class="detail-label">Ticket Number:</span>
+                            <span class="detail-value" id="detailTicket"></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">License Plate:</span>
+                            <span class="detail-value" id="detailPlate"></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Violation Type:</span>
+                            <span class="detail-value" id="detailType"></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Date:</span>
+                            <span class="detail-value" id="detailDate"></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Location:</span>
+                            <span class="detail-value" id="detailLocation"></span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Status:</span>
+                            <span class="detail-value" id="detailStatus"></span>
+                        </div>
+                    </div>
+                    <div class="fine-amount">
+                        <span>Fine Amount:</span>
+                        <span class="amount" id="detailAmount">$0.00</span>
+                    </div>
+                </div>
+                
+                <!-- Payment Form -->
+                <form id="paymentForm">
+                    <h4 style="margin-top: 1.5rem;">Payment Information</h4>
+                    <input type="hidden" id="violationId" name="violation_id">
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="paymentMethod">Payment Method *</label>
+                        <select id="paymentMethod" name="payment_method" class="form-control" required>
+                            <option value="">Select payment method...</option>
+                            <option value="cash">Cash</option>
+                            <option value="credit_card">Credit Card</option>
+                            <option value="debit_card">Debit Card</option>
+                            <option value="check">Check</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="transactionRef">Transaction Reference</label>
+                        <input type="text" id="transactionRef" name="transaction_reference" class="form-control" 
+                               placeholder="e.g., Check # or last 4 digits of card">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="paymentNotes">Notes</label>
+                        <textarea id="paymentNotes" name="notes" class="form-control" rows="2" 
+                                  placeholder="Optional payment notes..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="backToLookup()" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i>
+                    Back
+                </button>
+                <button type="button" onclick="processPayment()" class="btn btn-success">
+                    <i class="fas fa-check-circle"></i>
+                    Process Payment
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Search Modal -->
+<div id="quickSearchModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+            <h3>Quick Ticket Search</h3>
+            <button onclick="closeQuickSearch()" class="close-btn">&times;</button>
+        </div>
+        <form id="quickSearchForm">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="quickTicketNumber">Ticket Number</label>
+                    <input type="text" id="quickTicketNumber" class="form-control" 
+                           placeholder="e.g., TKT-2025-0001" required autofocus>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeQuickSearch()" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-search"></i>
+                    Search
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+/* Modal Styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: var(--bg-primary);
+    border-radius: 0.5rem;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 0;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Violation Details */
+.violation-details {
+    background-color: var(--bg-secondary);
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.violation-details h4 {
+    margin: 0 0 1rem 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.detail-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.detail-value {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.fine-amount {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.fine-amount .amount {
+    color: var(--danger-color);
+}
+
+/* Action buttons in table */
+.action-btn {
+    background: none;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--primary-color);
+}
+
+@media (max-width: 480px) {
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentViolation = null;
+
+// Initialize page
+async function initializePage() {
+    await loadStatistics();
+    await loadRecentPayments();
+}
+
+// Load statistics
+async function loadStatistics() {
+    try {
+        const stats = await api.dashboard.getStats();
+        
+        // Display cashier-specific stats
+        document.getElementById('todayCollections').textContent = dashboardUtils.formatCurrency(stats.total_collected_today || 0);
+        document.getElementById('todayTransactions').textContent = stats.payments_processed_today || 0;
+        document.getElementById('pendingPayments').textContent = stats.pending_payments || 0;
+        
+        // Calculate monthly total from payments
+        const payments = await api.payments.list();
+        const thisMonth = new Date().getMonth();
+        const monthlyTotal = payments
+            .filter(p => new Date(p.created_at).getMonth() === thisMonth)
+            .reduce((sum, p) => sum + p.amount, 0);
+        document.getElementById('monthlyTotal').textContent = dashboardUtils.formatCurrency(monthlyTotal);
+    } catch (error) {
+        console.error('Failed to load statistics:', error);
+        // Set defaults on error
+        document.getElementById('todayCollections').textContent = '$0';
+        document.getElementById('todayTransactions').textContent = '0';
+        document.getElementById('pendingPayments').textContent = '0';
+        document.getElementById('monthlyTotal').textContent = '$0';
+    }
+}
+
+// Load recent payments
+async function loadRecentPayments() {
+    try {
+        const payments = await api.payments.list({ limit: 10 });
+        const tbody = document.querySelector('#recentPaymentsTable tbody');
+        
+        tbody.innerHTML = '';
+        
+        if (payments.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No payments found</td></tr>';
+            return;
+        }
+        
+        payments.forEach(payment => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${payment.receipt_number}</td>
+                <td>${payment.violation?.ticket_number || 'N/A'}</td>
+                <td>${payment.violation?.plate_number || 'N/A'}</td>
+                <td>${dashboardUtils.formatCurrency(payment.amount)}</td>
+                <td>${formatPaymentMethod(payment.payment_method)}</td>
+                <td>${new Date(payment.created_at).toLocaleTimeString()}</td>
+                <td>
+                    <button class="action-btn" onclick="viewReceipt('${payment.id}')" title="View Receipt">
+                        <i class="fas fa-receipt"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Failed to load payments:', error);
+        const tbody = document.querySelector('#recentPaymentsTable tbody');
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Failed to load payments</td></tr>';
+    }
+}
+
+// Format payment method
+function formatPaymentMethod(method) {
+    const methods = {
+        'cash': 'Cash',
+        'credit_card': 'Credit Card',
+        'debit_card': 'Debit Card',
+        'check': 'Check'
+    };
+    return methods[method] || method;
+}
+
+// Show payment lookup modal
+function showPaymentLookup() {
+    document.getElementById('paymentModal').style.display = 'flex';
+    document.getElementById('lookupStep').style.display = 'block';
+    document.getElementById('paymentStep').style.display = 'none';
+    document.getElementById('ticketNumber').focus();
+}
+
+// Close payment modal
+function closePaymentModal() {
+    document.getElementById('paymentModal').style.display = 'none';
+    document.getElementById('lookupForm').reset();
+    document.getElementById('paymentForm').reset();
+    currentViolation = null;
+}
+
+// Back to lookup step
+function backToLookup() {
+    document.getElementById('lookupStep').style.display = 'block';
+    document.getElementById('paymentStep').style.display = 'none';
+    document.getElementById('ticketNumber').focus();
+}
+
+// Show quick search
+function showQuickSearch() {
+    document.getElementById('quickSearchModal').style.display = 'flex';
+    document.getElementById('quickTicketNumber').focus();
+}
+
+// Close quick search
+function closeQuickSearch() {
+    document.getElementById('quickSearchModal').style.display = 'none';
+    document.getElementById('quickSearchForm').reset();
+}
+
+// View receipt
+function viewReceipt(paymentId) {
+    // Simple alert with payment info
+    api.payments.list().then(payments => {
+        const payment = payments.find(p => p.id === parseInt(paymentId));
+        if (payment) {
+            alert(`Receipt: ${payment.receipt_number}\nTicket: ${payment.violation.ticket_number}\nAmount: $${payment.amount}\nMethod: ${formatPaymentMethod(payment.payment_method)}\nDate: ${new Date(payment.created_at).toLocaleString()}`);
+        }
+    });
+}
+
+// Handle lookup form submission
+document.getElementById('lookupForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const ticketNumber = document.getElementById('ticketNumber').value.trim();
+    
+    dashboardUtils.loading.show('Searching for violation...');
+    
+    try {
+        const violation = await api.violations.getByTicket(ticketNumber);
+        
+        if (!violation) {
+            dashboardUtils.toast.error('Violation not found');
+            return;
+        }
+        
+        if (violation.status === 'paid') {
+            dashboardUtils.toast.warning('This violation has already been paid');
+            return;
+        }
+        
+        if (violation.status === 'cancelled') {
+            dashboardUtils.toast.error('This violation has been cancelled');
+            return;
+        }
+        
+        // Store current violation
+        currentViolation = violation;
+        
+        // Populate details
+        document.getElementById('detailTicket').textContent = violation.ticket_number;
+        document.getElementById('detailPlate').textContent = violation.plate_number;
+        document.getElementById('detailType').textContent = `${violation.violation_type.code} - ${violation.violation_type.description}`;
+        document.getElementById('detailDate').textContent = dashboardUtils.formatDate(violation.created_at);
+        document.getElementById('detailLocation').textContent = violation.location;
+        document.getElementById('detailStatus').innerHTML = `<span class="badge badge-${getStatusBadgeClass(violation.status)}">${violation.status}</span>`;
+        document.getElementById('detailAmount').textContent = dashboardUtils.formatCurrency(violation.fine_amount);
+        document.getElementById('violationId').value = violation.id;
+        
+        // Show payment step
+        document.getElementById('lookupStep').style.display = 'none';
+        document.getElementById('paymentStep').style.display = 'block';
+        document.getElementById('paymentMethod').focus();
+        
+    } catch (error) {
+        handleApiError(error, 'Failed to lookup violation');
+    } finally {
+        dashboardUtils.loading.hide();
+    }
+});
+
+// Get badge class for status
+function getStatusBadgeClass(status) {
+    const classes = {
+        'pending': 'warning',
+        'paid': 'success',
+        'appealed': 'info',
+        'cancelled': 'danger'
+    };
+    return classes[status] || 'secondary';
+}
+
+// Process payment
+async function processPayment() {
+    const form = document.getElementById('paymentForm');
+    const formData = new FormData(form);
+    
+    if (!formData.get('payment_method')) {
+        dashboardUtils.toast.error('Please select a payment method');
+        return;
+    }
+    
+    const data = {
+        violation_id: parseInt(formData.get('violation_id')),
+        payment_method: formData.get('payment_method'),
+        transaction_reference: formData.get('transaction_reference'),
+        notes: formData.get('notes')
+    };
+    
+    dashboardUtils.loading.show('Processing payment...');
+    
+    try {
+        const result = await api.payments.create(data);
+        dashboardUtils.toast.success(`Payment processed successfully! Receipt: ${result.receipt_number}`);
+        closePaymentModal();
+        await loadRecentPayments();
+        await loadStatistics();
+        
+        // Payment processed successfully
+    } catch (error) {
+        handleApiError(error, 'Failed to process payment');
+    } finally {
+        dashboardUtils.loading.hide();
+    }
+}
+
+// Handle quick search
+document.getElementById('quickSearchForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const ticketNumber = document.getElementById('quickTicketNumber').value.trim();
+    closeQuickSearch();
+    
+    // Use the main payment modal for the search
+    document.getElementById('ticketNumber').value = ticketNumber;
+    showPaymentLookup();
+    document.getElementById('lookupForm').dispatchEvent(new Event('submit'));
+});
+
+// Close modals on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closePaymentModal();
+        closeQuickSearch();
+    }
+});
+
+// Close modals on outside click
+document.querySelectorAll('.modal').forEach(modal => {
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+});
+</script>
+{% endblock %}

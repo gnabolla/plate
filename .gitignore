@@ -7,6 +7,7 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv
 
 # Database
 data/
@@ -14,17 +15,17 @@ data/
 *.sqlite
 *.sqlite3
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Uploads
-uploads/
-
-# Environment variables
-.env
+*~
 
 # OS
 .DS_Store
@@ -32,3 +33,60 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Uploaded files
+uploads/
+static/uploads/
+detected_plates/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# OCR/Tesseract
+tesseract-*.log
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/

@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(ss:*)",
+      "Bash(hostname:*)",
+      "Bash(systemctl status:*)",
+      "Bash(sudo apt-get:*)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(python3:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(sudo chown:*)",
+      "Bash(sudo systemctl:*)",
+      "Bash(sudo systemctl start:*)",
+      "Bash(sudo rm:*)",
+      "Bash(sudo ln:*)",
+      "Bash(sudo nginx:*)",
+      "Bash(grep:*)",
+      "Bash(tesseract:*)",
+      "Bash(sudo journalctl:*)",
+      "Bash(sqlite3:*)",
+      "Bash(chmod:*)",
+      "Bash(curl:*)",
+      "Bash(sudo kill:*)",
+      "Bash(sudo supervisorctl:*)",
+      "Bash(pkill:*)",
+      "Bash(true)",
+      "Bash(git add:*)",
+      "Bash(git config:*)",
+      "Bash(git commit:*)",
+      "Bash(ln:*)",
+      "Bash(nginx:*)",
+      "Bash(rm:*)"
+    ],
+    "deny": []
+  }
+}

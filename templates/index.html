@@ -5,12 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Free License Plate Detection</title>
     <link rel="stylesheet" href="/plate/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
-    <div class="container">
-        <div style="text-align: right; margin-bottom: 10px;">
-            <a href="/plate/admin" style="color: #4CAF50; text-decoration: none;">Admin Panel →</a>
+    <!-- Navigation Header -->
+    <nav style="background-color: #2563eb; padding: 1rem 0; margin-bottom: 2rem;">
+        <div style="max-width: 1200px; margin: 0 auto; padding: 0 20px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; gap: 2rem; align-items: center;">
+                <h2 style="color: white; margin: 0;">Traffic Violation System</h2>
+                <div style="display: flex; gap: 1rem;">
+                    <a href="/plate/" style="color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; background-color: rgba(255,255,255,0.2);">
+                        <i class="fas fa-camera"></i> Plate Scanner
+                    </a>
+                    <a href="/plate/admin" style="color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; transition: background-color 0.2s;">
+                        <i class="fas fa-car"></i> Vehicle Registry
+                    </a>
+                </div>
+            </div>
+            <div id="userNav" style="display: none; gap: 1rem; align-items: center;">
+                <span id="currentUser" style="color: white;"></span>
+                <a id="dashboardLink" href="#" style="color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; background-color: rgba(255,255,255,0.2);">
+                    <i class="fas fa-tachometer-alt"></i> Dashboard
+                </a>
+                <button onclick="logout()" style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.25rem; cursor: pointer;">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+            <div id="guestNav">
+                <a href="/plate/login" style="color: white; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; background-color: rgba(255,255,255,0.2);">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+            </div>
         </div>
+    </nav>
+    
+    <div class="container">
         <h1>License Plate Detection</h1>
         
         <div class="input-section">
@@ -63,6 +92,38 @@
         </div>
     </div>
     
+    <script src="/plate/static/auth.js"></script>
     <script src="/plate/static/script.js"></script>
+    <script>
+        // Check authentication and setup navigation
+        document.addEventListener('DOMContentLoaded', async () => {
+            const userData = auth.getUserData();
+            if (userData) {
+                // User is logged in
+                document.getElementById('userNav').style.display = 'flex';
+                document.getElementById('guestNav').style.display = 'none';
+                document.getElementById('currentUser').textContent = userData.username;
+                
+                // Set dashboard link based on role
+                const dashboardLink = document.getElementById('dashboardLink');
+                switch(userData.role) {
+                    case 'super_admin':
+                        dashboardLink.href = '/plate/admin/dashboard';
+                        break;
+                    case 'officer':
+                        dashboardLink.href = '/plate/officer/dashboard';
+                        break;
+                    case 'cashier':
+                        dashboardLink.href = '/plate/cashier/dashboard';
+                        break;
+                }
+            }
+        });
+        
+        // Logout function
+        function logout() {
+            auth.logout();
+        }
+    </script>
 </body>
 </html>

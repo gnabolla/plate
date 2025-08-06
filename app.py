@@ -324,15 +324,22 @@ async def update_violation_type(
 
 @app.post("/api/violations", response_model=schemas.Violation)
 async def create_violation(
-    violation_data: schemas.ViolationCreate,
+    violation_data: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_officer),
     request: Request = None
 ):
     """Create a new violation (Officers and Super Admins only)"""
-    # Verify vehicle exists if provided
-    if violation_data.vehicle_id:
-        vehicle = db.query(Vehicle).filter(Vehicle.id == violation_data.vehicle_id).first()
+    # Handle plate number if provided
+    vehicle_id = None
+    if 'plate_number' in violation_data:
+        plate_number = violation_data['plate_number']
+        vehicle = db.query(Vehicle).filter(Vehicle.plate_number == plate_number).first()
+        if vehicle:
+            vehicle_id = vehicle.id
+    elif 'vehicle_id' in violation_data:
+        vehicle_id = violation_data['vehicle_id']
+        vehicle = db.query(Vehicle).filter(Vehicle.id == vehicle_id).first()
         if not vehicle:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -341,7 +348,7 @@ async def create_violation(
     
     # Verify violation type exists
     violation_type = db.query(ViolationType).filter(
-        ViolationType.id == violation_data.violation_type_id
+        ViolationType.id == violation_data['violation_type_id']
     ).first()
     if not violation_type:
         raise HTTPException(
@@ -355,9 +362,12 @@ async def create_violation(
     ticket_number = f"TKT-{datetime.now().strftime('%Y%m%d')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
     
     # Create violation
-    violation_dict = violation_data.dict()
     new_violation = Violation(
-        **violation_dict,
+        vehicle_id=vehicle_id,
+        violation_type_id=violation_data['violation_type_id'],
+        location=violation_data.get('location'),
+        description=violation_data.get('description'),
+        fine_amount=violation_type.fine_amount,  # Use fine amount from violation type
         ticket_number=ticket_number,
         officer_id=current_user.id,
         issued_at=datetime.utcnow(),
@@ -884,10 +894,64 @@ def extract_plate_number(text):
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Serve the login page"""
+    return templates.TemplateResponse("login.html", {"request": request})
+
+# Dashboard routes
+@app.get("/admin/dashboard", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    """Admin dashboard"""
+    return templates.TemplateResponse("admin_dashboard.html", {"request": request})
+
+@app.get("/officer/dashboard", response_class=HTMLResponse)
+async def officer_dashboard(request: Request):
+    """Officer dashboard"""
+    return templates.TemplateResponse("officer_dashboard.html", {"request": request})
+
+@app.get("/cashier/dashboard", response_class=HTMLResponse)
+async def cashier_dashboard(request: Request):
+    """Cashier dashboard"""
+    return templates.TemplateResponse("cashier_dashboard.html", {"request": request})
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request, db: Session = Depends(get_db)):
     owners = db.query(Owner).all()
-    return templates.TemplateResponse("admin.html", {"request": request, "owners": owners})
+    # Convert to dict format with vehicles
+    owners_data = []
+    for owner in owners:
+        vehicles = db.query(Vehicle).filter(Vehicle.owner_id == owner.id).all()
+        owner_dict = {
+            "id": owner.id,
+            "first_name": owner.first_name,
+            "last_name": owner.last_name,
+            "email": owner.email,
+            "phone": owner.phone,
+            "address": owner.address,
+            "city": owner.city,
+            "state": owner.state,
+            "zip_code": owner.zip_code,
+            "created_at": owner.created_at.isoformat() if owner.created_at else None,
+            "updated_at": owner.updated_at.isoformat() if owner.updated_at else None,
+            "vehicles": []
+        }
+        for vehicle in vehicles:
+            owner_dict["vehicles"].append({
+                "id": vehicle.id,
+                "plate_number": vehicle.plate_number,
+                "make": vehicle.make,
+                "model": vehicle.model,
+                "year": vehicle.year,
+                "color": vehicle.color,
+                "status": vehicle.status
+            })
+        owners_data.append(owner_dict)
+    
+    return templates.TemplateResponse("admin_vehicles_modal.html", {
+        "request": request, 
+        "owners": owners_data
+    })
 
 # API Endpoints for database operations
 @app.post("/api/owners", response_model=schemas.Owner)
@@ -898,10 +962,40 @@ async def create_owner(owner: schemas.OwnerCreate, db: Session = Depends(get_db)
     db.refresh(db_owner)
     return db_owner
 
-@app.get("/api/owners", response_model=List[schemas.Owner])
+@app.get("/api/owners")
 async def get_owners(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     owners = db.query(Owner).offset(skip).limit(limit).all()
-    return owners
+    # Add vehicles to each owner
+    result = []
+    for owner in owners:
+        owner_dict = {
+            "id": owner.id,
+            "first_name": owner.first_name,
+            "last_name": owner.last_name,
+            "email": owner.email,
+            "phone": owner.phone,
+            "address": owner.address,
+            "city": owner.city,
+            "state": owner.state,
+            "zip_code": owner.zip_code,
+            "created_at": owner.created_at,
+            "updated_at": owner.updated_at,
+            "vehicles": []
+        }
+        # Get vehicles for this owner
+        vehicles = db.query(Vehicle).filter(Vehicle.owner_id == owner.id).all()
+        for vehicle in vehicles:
+            owner_dict["vehicles"].append({
+                "id": vehicle.id,
+                "plate_number": vehicle.plate_number,
+                "make": vehicle.make,
+                "model": vehicle.model,
+                "year": vehicle.year,
+                "color": vehicle.color,
+                "status": vehicle.status
+            })
+        result.append(owner_dict)
+    return result
 
 @app.post("/api/vehicles", response_model=schemas.Vehicle)
 async def create_vehicle(vehicle: schemas.VehicleCreate, db: Session = Depends(get_db)):
@@ -944,21 +1038,16 @@ async def detect_plate(
             # Check database for manual input too
             plate_upper = manual_plate.upper()
             normalized_input = normalize_plate_number(manual_plate)
-            print(f"Searching for plate: {plate_upper} (normalized: {normalized_input})")  # Debug
             
             # Query database - try to find vehicles where normalized plate matches
             all_vehicles = db.query(Vehicle).all()
             vehicle = None
-            print(f"Total vehicles in database: {len(all_vehicles)}")  # Debug
             for v in all_vehicles:
                 normalized_db = normalize_plate_number(v.plate_number)
-                print(f"DB plate: {v.plate_number} -> normalized: {normalized_db}")  # Debug
                 if normalized_db == normalized_input:
                     vehicle = v
-                    print(f"MATCH FOUND! Plate: {v.plate_number}, Owner: {v.owner.first_name} {v.owner.last_name}")  # Debug
                     break
             
-            print(f"Vehicle found: {vehicle is not None}")  # Debug
             
             # Log the detection
             detection_log = DetectionLog(

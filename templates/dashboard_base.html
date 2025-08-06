@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Dashboard{% endblock %} - Traffic Violation System</title>
+    <link rel="stylesheet" href="/plate/static/dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-shield-alt logo"></i>
+                <h2>Traffic System</h2>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <ul>
+                    <!-- Common menu items -->
+                    <li>
+                        <a href="/plate/" class="nav-link">
+                            <i class="fas fa-home"></i>
+                            <span>Home</span>
+                        </a>
+                    </li>
+                    
+                    {% block nav_items %}
+                    <!-- Role-specific navigation items will be inserted here -->
+                    {% endblock %}
+                    
+                    <li class="nav-separator"></li>
+                    
+                    <li>
+                        <a href="#" class="nav-link" onclick="auth.logout(); return false;">
+                            <i class="fas fa-sign-out-alt"></i>
+                            <span>Logout</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <i class="fas fa-user-circle"></i>
+                    <div>
+                        <p class="username" id="currentUsername">Loading...</p>
+                        <p class="role" id="currentRole">...</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Bar -->
+            <header class="topbar">
+                <button class="menu-toggle" id="menuToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                
+                <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+                
+                <div class="topbar-actions">
+                    <button class="notification-btn">
+                        <i class="fas fa-bell"></i>
+                        <span class="notification-badge" style="display: none;">0</span>
+                    </button>
+                    
+                    <div class="user-menu">
+                        <button class="user-menu-toggle">
+                            <i class="fas fa-user-circle"></i>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div class="user-dropdown" style="display: none;">
+                            <a href="#" onclick="showProfile(); return false;">
+                                <i class="fas fa-user"></i> Profile
+                            </a>
+                            <a href="#" onclick="showSettings(); return false;">
+                                <i class="fas fa-cog"></i> Settings
+                            </a>
+                            <div class="dropdown-divider"></div>
+                            <a href="#" onclick="auth.logout(); return false;">
+                                <i class="fas fa-sign-out-alt"></i> Logout
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            
+            <!-- Page Content -->
+            <div class="content-wrapper">
+                {% block content %}
+                <!-- Page-specific content goes here -->
+                {% endblock %}
+            </div>
+        </main>
+    </div>
+    
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <i class="fas fa-spinner fa-spin fa-3x"></i>
+            <p>Loading...</p>
+        </div>
+    </div>
+    
+    <!-- Toast Notifications Container -->
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <!-- Scripts -->
+    <script src="/plate/static/auth.js"></script>
+    <script src="/plate/static/api.js"></script>
+    <script src="/plate/static/dashboard.js"></script>
+    
+    <script>
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Check authentication
+            const allowedRoles = {% block allowed_roles %}[]{% endblock %};
+            const isAuthorized = await auth.requireAuth(allowedRoles);
+            
+            if (!isAuthorized) {
+                return; // User will be redirected by auth.requireAuth
+            }
+            
+            // Display user info
+            const userData = auth.getUserData();
+            if (userData) {
+                document.getElementById('currentUsername').textContent = userData.username;
+                document.getElementById('currentRole').textContent = userData.role.replace('_', ' ').toUpperCase();
+            }
+            
+            // Initialize page-specific functionality
+            if (typeof initializePage === 'function') {
+                initializePage();
+            }
+        });
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,545 @@
+{% extends "dashboard_base.html" %}
+
+{% block title %}Officer Dashboard{% endblock %}
+{% block page_title %}Officer Dashboard{% endblock %}
+
+{% block allowed_roles %}['officer', 'super_admin']{% endblock %}
+
+{% block nav_items %}
+<li>
+    <a href="/plate/officer/dashboard" class="nav-link active">
+        <i class="fas fa-tachometer-alt"></i>
+        <span>Dashboard</span>
+    </a>
+</li>
+<li>
+    <a href="#" class="nav-link" onclick="showViolationForm(); return false;">
+        <i class="fas fa-plus-circle"></i>
+        <span>Create Violation</span>
+    </a>
+</li>
+<li>
+    <a href="/plate/" class="nav-link">
+        <i class="fas fa-camera"></i>
+        <span>Plate Scanner</span>
+    </a>
+</li>
+{% endblock %}
+
+{% block content %}
+<!-- Statistics Cards -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="todayViolations">0</div>
+                <div class="stat-label">My Total Violations</div>
+            </div>
+            <div class="stat-icon primary">
+                <i class="fas fa-file-alt"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="pendingViolations">0</div>
+                <div class="stat-label">My Pending</div>
+            </div>
+            <div class="stat-icon warning">
+                <i class="fas fa-clock"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="paidViolations">0</div>
+                <div class="stat-label">My Paid</div>
+            </div>
+            <div class="stat-icon success">
+                <i class="fas fa-check-circle"></i>
+            </div>
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-header">
+            <div>
+                <div class="stat-value" id="totalFines">$0</div>
+                <div class="stat-label">Total Fines Issued</div>
+            </div>
+            <div class="stat-icon info">
+                <i class="fas fa-dollar-sign"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Quick Actions</h3>
+    </div>
+    <div class="card-body">
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="showViolationForm()">
+                <i class="fas fa-plus"></i>
+                Create New Violation
+            </button>
+            <button class="btn btn-secondary" onclick="window.location.href='/plate/'">
+                <i class="fas fa-camera"></i>
+                Scan License Plate
+            </button>
+            <button class="btn btn-secondary" onclick="showSearchForm()">
+                <i class="fas fa-search"></i>
+                Search Violations
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Violations -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Recent Violations</h3>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="data-table" id="recentViolationsTable">
+                <thead>
+                    <tr>
+                        <th>Ticket #</th>
+                        <th>Plate</th>
+                        <th>Type</th>
+                        <th>Fine</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Data will be populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Violation Form Modal -->
+<div id="violationModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Create New Violation</h3>
+            <button onclick="closeViolationForm()" class="close-btn">&times;</button>
+        </div>
+        <form id="violationForm">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="plateNumber">License Plate Number *</label>
+                    <input type="text" id="plateNumber" name="plate_number" class="form-control" required 
+                           placeholder="e.g., ABC-1234" style="text-transform: uppercase;">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="violationType">Violation Type *</label>
+                    <select id="violationType" name="violation_type_id" class="form-control" required>
+                        <option value="">Select violation type...</option>
+                        <!-- Options will be populated by JavaScript -->
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="location">Location *</label>
+                    <input type="text" id="location" name="location" class="form-control" required 
+                           placeholder="e.g., Main St & 5th Ave">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="description">Description</label>
+                    <textarea id="description" name="description" class="form-control" rows="3" 
+                              placeholder="Additional details about the violation..."></textarea>
+                </div>
+                
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeViolationForm()" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i>
+                    Create Violation
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Search Modal -->
+<div id="searchModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Search Violations</h3>
+            <button onclick="closeSearchForm()" class="close-btn">&times;</button>
+        </div>
+        <form id="searchForm">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="searchTicket">Ticket Number</label>
+                    <input type="text" id="searchTicket" class="form-control" placeholder="e.g., TKT-2025-0001">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="searchPlate">License Plate</label>
+                    <input type="text" id="searchPlate" class="form-control" placeholder="e.g., ABC-1234">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="searchStatus">Status</label>
+                    <select id="searchStatus" class="form-control">
+                        <option value="">All Statuses</option>
+                        <option value="pending">Pending</option>
+                        <option value="paid">Paid</option>
+                        <option value="appealed">Appealed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeSearchForm()" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-search"></i>
+                    Search
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+/* Modal Styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: var(--bg-primary);
+    border-radius: 0.5rem;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 0;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Action buttons in table */
+.action-btn {
+    background: none;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    border-radius: 0.25rem;
+    transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--primary-color);
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Initialize page
+async function initializePage() {
+    await loadViolationTypes();
+    await loadStatistics();
+    await loadRecentViolations();
+}
+
+// Load violation types
+async function loadViolationTypes() {
+    try {
+        const types = await api.violationTypes.list();
+        const select = document.getElementById('violationType');
+        
+        types.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type.id;
+            option.textContent = `${type.code} - ${type.description} ($${type.fine_amount})`;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        handleApiError(error, 'Failed to load violation types');
+    }
+}
+
+// Load statistics
+async function loadStatistics() {
+    try {
+        const stats = await api.dashboard.getStats();
+        
+        // Display officer-specific stats
+        document.getElementById('todayViolations').textContent = stats.my_violations_issued || 0;
+        document.getElementById('pendingViolations').textContent = stats.my_violations_pending || 0;
+        document.getElementById('paidViolations').textContent = stats.my_violations_paid || 0;
+        
+        // Calculate total fines from violations
+        const violations = await api.violations.list({ limit: 100 });
+        const totalFines = violations.reduce((sum, v) => sum + v.fine_amount, 0);
+        document.getElementById('totalFines').textContent = dashboardUtils.formatCurrency(totalFines);
+    } catch (error) {
+        console.error('Failed to load statistics:', error);
+        // Set defaults on error
+        document.getElementById('todayViolations').textContent = '0';
+        document.getElementById('pendingViolations').textContent = '0';
+        document.getElementById('paidViolations').textContent = '0';
+        document.getElementById('totalFines').textContent = '$0';
+    }
+}
+
+// Load recent violations
+async function loadRecentViolations() {
+    try {
+        const violations = await api.violations.list({ limit: 10 });
+        const tbody = document.querySelector('#recentViolationsTable tbody');
+        
+        tbody.innerHTML = '';
+        
+        if (violations.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No violations found</td></tr>';
+            return;
+        }
+        
+        violations.forEach(violation => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${violation.ticket_number}</td>
+                <td>${violation.plate_number}</td>
+                <td>${violation.violation_type.code}</td>
+                <td>${dashboardUtils.formatCurrency(violation.fine_amount)}</td>
+                <td>${dashboardUtils.formatDate(violation.created_at)}</td>
+                <td><span class="badge badge-${getStatusBadgeClass(violation.status)}">${violation.status}</span></td>
+                <td>
+                    <button class="action-btn" onclick="viewViolation('${violation.id}')" title="View Details">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        handleApiError(error, 'Failed to load violations');
+    }
+}
+
+// Get badge class for status
+function getStatusBadgeClass(status) {
+    const classes = {
+        'pending': 'warning',
+        'paid': 'success',
+        'appealed': 'info',
+        'cancelled': 'danger'
+    };
+    return classes[status] || 'secondary';
+}
+
+// Show violation form
+function showViolationForm() {
+    document.getElementById('violationModal').style.display = 'flex';
+    document.getElementById('plateNumber').focus();
+}
+
+// Close violation form
+function closeViolationForm() {
+    document.getElementById('violationModal').style.display = 'none';
+    document.getElementById('violationForm').reset();
+}
+
+// Show search form
+function showSearchForm() {
+    document.getElementById('searchModal').style.display = 'flex';
+}
+
+// Close search form
+function closeSearchForm() {
+    document.getElementById('searchModal').style.display = 'none';
+    document.getElementById('searchForm').reset();
+}
+
+// View violation details
+function viewViolation(id) {
+    // Simple alert with violation info
+    api.violations.list().then(violations => {
+        const violation = violations.find(v => v.id === parseInt(id));
+        if (violation) {
+            alert(`Ticket: ${violation.ticket_number}\nPlate: ${violation.plate_number}\nType: ${violation.violation_type.description}\nFine: $${violation.fine_amount}\nStatus: ${violation.status}\nLocation: ${violation.location || 'N/A'}`);
+        }
+    });
+}
+
+// Handle violation form submission
+document.getElementById('violationForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const data = {
+        plate_number: formData.get('plate_number').toUpperCase(),
+        violation_type_id: parseInt(formData.get('violation_type_id')),
+        location: formData.get('location'),
+        description: formData.get('description')
+    };
+    
+    // No photo upload - removed for simplicity
+    
+    dashboardUtils.loading.show('Creating violation...');
+    
+    try {
+        const result = await api.violations.create(data);
+        dashboardUtils.toast.success(`Violation created successfully! Ticket: ${result.ticket_number}`);
+        closeViolationForm();
+        await loadRecentViolations();
+        await loadStatistics();
+    } catch (error) {
+        handleApiError(error, 'Failed to create violation');
+    } finally {
+        dashboardUtils.loading.hide();
+    }
+});
+
+// Handle search form submission
+document.getElementById('searchForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const ticketNumber = document.getElementById('searchTicket').value;
+    const plateNumber = document.getElementById('searchPlate').value;
+    const status = document.getElementById('searchStatus').value;
+    
+    dashboardUtils.loading.show('Searching...');
+    
+    try {
+        let violations = await api.violations.list();
+        
+        // Filter results
+        if (ticketNumber) {
+            violations = violations.filter(v => v.ticket_number.includes(ticketNumber));
+        }
+        if (plateNumber) {
+            violations = violations.filter(v => v.plate_number.includes(plateNumber.toUpperCase()));
+        }
+        if (status) {
+            violations = violations.filter(v => v.status === status);
+        }
+        
+        // Update table with search results
+        const tbody = document.querySelector('#recentViolationsTable tbody');
+        tbody.innerHTML = '';
+        
+        if (violations.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">No violations found matching search criteria</td></tr>';
+        } else {
+            violations.forEach(violation => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${violation.ticket_number}</td>
+                    <td>${violation.plate_number}</td>
+                    <td>${violation.violation_type.code}</td>
+                    <td>${dashboardUtils.formatCurrency(violation.fine_amount)}</td>
+                    <td>${dashboardUtils.formatDate(violation.created_at)}</td>
+                    <td><span class="badge badge-${getStatusBadgeClass(violation.status)}">${violation.status}</span></td>
+                    <td>
+                        <button class="action-btn" onclick="viewViolation('${violation.id}')" title="View Details">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        closeSearchForm();
+        dashboardUtils.toast.success(`Found ${violations.length} violations`);
+    } catch (error) {
+        handleApiError(error, 'Search failed');
+    } finally {
+        dashboardUtils.loading.hide();
+    }
+});
+
+// Close modals on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeViolationForm();
+        closeSearchForm();
+    }
+});
+
+// Close modals on outside click
+document.querySelectorAll('.modal').forEach(modal => {
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+});
+</script>
+{% endblock %}
